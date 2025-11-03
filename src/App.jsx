@@ -1,8 +1,9 @@
 // ===============================================
-// 💬 BankAI — Dual Reply + Elegant Balance (v3.3)
+// 💬 BankAI — Dual Reply + Auto Voice (v3.4)
 // -----------------------------------------------
-// ✅ Same elegant text/amplitude design
-// ✅ Auto voice playback (phrase + balance amount)
+// ✅ Auto voice playback on iPhone/Android/desktop
+// ✅ Silent AudioContext unlock (no tap needed)
+// ✅ Elegant text + amplitude design
 // ✅ Displays formatted balance below main phrase
 // ===============================================
 
@@ -23,25 +24,50 @@ export default function App() {
     setTimeout(() => setToast(""), timeout);
   };
 
-  // 🎧 Voice auto-play (phrase + optional balance)
+  // 🎧 Voice auto-play (mobile-safe, no tap needed)
   useEffect(() => {
-    if (reply?.voice_url) {
-      const playVoices = async () => {
-        try {
-          const phrase = new Audio(`${API_BASE}${reply.voice_url}`);
-          await phrase.play();
+    if (!reply?.voice_url) return;
 
-          if (reply.balance_amount && reply.balance_amount.endsWith(".wav")) {
-            const amount = new Audio(`${API_BASE}${reply.balance_amount}`);
-            await amount.play();
-          }
-        } catch (e) {
-          console.warn("🔇 Auto-play blocked:", e);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    // Silent audio context unlock for iOS/Android
+    const unlockAudioContext = () => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(ctx.destination);
+        src.start(0);
+        if (ctx.state === "suspended") ctx.resume();
+        console.log("🔓 Audio context unlocked for mobile");
+      } catch (e) {
+        console.warn("⚠️ Audio context unlock failed:", e);
+      }
+    };
+
+    const playVoices = async () => {
+      try {
+        if (isMobile) unlockAudioContext();
+
+        const phrase = new Audio(`${API_BASE}${reply.voice_url}`);
+        await phrase.play();
+
+        if (reply.balance_amount && reply.balance_amount.endsWith(".wav")) {
+          const amount = new Audio(`${API_BASE}${reply.balance_amount}`);
+          await amount.play();
         }
-      };
-      playVoices();
-      showToast("🎧 BankAI is replying...");
-    }
+
+        console.log("🎵 BankAI voice reply played");
+      } catch (e) {
+        console.warn("🔇 Auto-play blocked or failed:", e);
+      }
+    };
+
+    // small delay for mobile audio engine readiness
+    setTimeout(playVoices, isMobile ? 400 : 100);
+    showToast("🎧 BankAI is replying...");
   }, [reply]);
 
   // 💰 Load balance text (from .txt or direct string)
