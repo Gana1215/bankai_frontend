@@ -1,97 +1,66 @@
 // ===============================================
-// 💬 BankAI — Dual Reply + Auto Voice (v3.4)
+// 💬 BankAI — Secure Display + Mobile Fix (v3.5)
 // -----------------------------------------------
-// ✅ Auto voice playback on iPhone/Android/desktop
-// ✅ Silent AudioContext unlock (no tap needed)
-// ✅ Elegant text + amplitude design
-// ✅ Displays formatted balance below main phrase
+// ✅ Matches backend v2.5 (corebank_data, static voice only)
+// ✅ Instant static voice playback (mobile-safe)
+// ✅ Shows dynamic CoreBank text securely
+// ✅ No voice for balances or names
 // ===============================================
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Recorder from "./components/Recorder";
 import { API_BASE } from "./utils/api";
 import "./components/amplitude.css";
 
 export default function App() {
   const [reply, setReply] = useState(null);
-  const [balanceText, setBalanceText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const audioCtxRef = useRef(null);
+
+  // 🔓 Persistent unlocked audio context for mobile
+  useEffect(() => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioCtxRef.current = new AudioCtx();
+      const unlock = () => {
+        const buffer = audioCtxRef.current.createBuffer(1, 1, 22050);
+        const src = audioCtxRef.current.createBufferSource();
+        src.buffer = buffer;
+        src.connect(audioCtxRef.current.destination);
+        src.start(0);
+        if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      };
+      window.addEventListener("touchstart", unlock, { once: true });
+      window.addEventListener("click", unlock, { once: true });
+    } catch (e) {
+      console.warn("⚠️ AudioContext unlock failed:", e);
+    }
+  }, []);
 
   const showToast = (msg, timeout = 2500) => {
     setToast(msg);
     setTimeout(() => setToast(""), timeout);
   };
 
-  // 🎧 Voice auto-play (mobile-safe, no tap needed)
+  // 🎧 Voice auto-play (safe timing)
   useEffect(() => {
     if (!reply?.voice_url) return;
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-    // Silent audio context unlock for iOS/Android
-    const unlockAudioContext = () => {
+    const playVoice = async () => {
       try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioContext();
-        const buffer = ctx.createBuffer(1, 1, 22050);
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(ctx.destination);
-        src.start(0);
-        if (ctx.state === "suspended") ctx.resume();
-        console.log("🔓 Audio context unlocked for mobile");
-      } catch (e) {
-        console.warn("⚠️ Audio context unlock failed:", e);
+        const audio = new Audio(`${API_BASE}${reply.voice_url}`);
+        await audio.play();
+        console.log("🎵 Static voice played OK");
+      } catch (err) {
+        console.warn("🔇 Voice auto-play blocked:", err);
       }
     };
 
-    const playVoices = async () => {
-      try {
-        if (isMobile) unlockAudioContext();
-
-        const phrase = new Audio(`${API_BASE}${reply.voice_url}`);
-        await phrase.play();
-
-        if (reply.balance_amount && reply.balance_amount.endsWith(".wav")) {
-          const amount = new Audio(`${API_BASE}${reply.balance_amount}`);
-          await amount.play();
-        }
-
-        console.log("🎵 BankAI voice reply played");
-      } catch (e) {
-        console.warn("🔇 Auto-play blocked or failed:", e);
-      }
-    };
-
-    // small delay for mobile audio engine readiness
-    setTimeout(playVoices, isMobile ? 400 : 100);
+    // delay slightly to allow iOS AudioContext to resume
+    setTimeout(playVoice, 600);
     showToast("🎧 BankAI is replying...");
-  }, [reply]);
-
-  // 💰 Load balance text (from .txt or direct string)
-  useEffect(() => {
-    const loadBalance = async () => {
-      if (reply?.balance_amount && reply.balance_amount.endsWith(".txt")) {
-        try {
-          const res = await fetch(`${API_BASE}${reply.balance_amount}`);
-          const txt = await res.text();
-          setBalanceText(txt.trim());
-        } catch (e) {
-          console.warn("⚠️ Failed to load balance text:", e);
-          setBalanceText("");
-        }
-      } else if (
-        typeof reply?.balance_amount === "string" &&
-        !reply.balance_amount.endsWith(".wav")
-      ) {
-        setBalanceText(reply.balance_amount);
-      } else {
-        setBalanceText("");
-      }
-    };
-    loadBalance();
   }, [reply]);
 
   const handleStop = async (blob) => {
@@ -99,7 +68,6 @@ export default function App() {
     setLoading(true);
     setError("");
     setReply(null);
-    setBalanceText("");
     showToast("📤 Sending your voice to BankAI...");
 
     try {
@@ -122,6 +90,19 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 🧾 Format dynamic CoreBank data (secure display)
+  const renderCoreBankData = (cb) => {
+    if (!cb) return null;
+    const exclude = ["account_balance", "customer_name"]; // never voice/speak sensitive
+    return Object.entries(cb)
+      .filter(([k]) => !exclude.includes(k))
+      .map(([k, v]) => (
+        <p key={k} className="text-gray-800 text-lg font-medium">
+          {k.replace(/_/g, " ")} : <span className="text-blue-700 font-semibold">{v}</span>
+        </p>
+      ));
   };
 
   return (
@@ -170,10 +151,9 @@ export default function App() {
             {reply.reply_text || "Хариулт ирсэнгүй."}
           </p>
 
-          {balanceText && (
-            <div className="text-3xl font-bold text-blue-700 mt-1 mb-3 tracking-wide drop-shadow-sm">
-              {balanceText} ₮
-            </div>
+          {/* 🔹 Secure CoreBank dynamic text */}
+          {reply.corebank_data && (
+            <div className="mt-2 space-y-1">{renderCoreBankData(reply.corebank_data)}</div>
           )}
 
           {reply.pdf_url && (
