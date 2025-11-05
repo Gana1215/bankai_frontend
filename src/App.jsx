@@ -89,6 +89,7 @@ export default function App() {
     }
   };
 
+  
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 via-teal-50 to-white font-sans text-center px-4">
       {/* 🤖 Header */}
