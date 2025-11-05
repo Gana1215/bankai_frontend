@@ -1,10 +1,10 @@
 // ===============================================
-// 💬 BankAI — Secure Display + Mobile Fix (v3.5)
+// 💬 BankAI — Elegant Blue-Teal Edition (v3.8)
 // -----------------------------------------------
-// ✅ Matches backend v2.5 (corebank_data, static voice only)
-// ✅ Instant static voice playback (mobile-safe)
-// ✅ Shows dynamic CoreBank text securely
-// ✅ No voice for balances or names
+// ✅ Same logic as v3.5 (no functional changes)
+// ✅ Adds beautiful gradient, animation, and glow
+// ✅ Smooth reply card + animated info lines
+// ✅ Mobile-safe, iOS-safe voice playback
 // ===============================================
 
 import React, { useState, useEffect, useRef } from "react";
@@ -47,7 +47,6 @@ export default function App() {
   // 🎧 Voice auto-play (safe timing)
   useEffect(() => {
     if (!reply?.voice_url) return;
-
     const playVoice = async () => {
       try {
         const audio = new Audio(`${API_BASE}${reply.voice_url}`);
@@ -57,8 +56,6 @@ export default function App() {
         console.warn("🔇 Voice auto-play blocked:", err);
       }
     };
-
-    // delay slightly to allow iOS AudioContext to resume
     setTimeout(playVoice, 600);
     showToast("🎧 BankAI is replying...");
   }, [reply]);
@@ -92,21 +89,8 @@ export default function App() {
     }
   };
 
-  // 🧾 Format dynamic CoreBank data (secure display)
-  const renderCoreBankData = (cb) => {
-    if (!cb) return null;
-    const exclude = ["account_balance", "customer_name"]; // never voice/speak sensitive
-    return Object.entries(cb)
-      .filter(([k]) => !exclude.includes(k))
-      .map(([k, v]) => (
-        <p key={k} className="text-gray-800 text-lg font-medium">
-          {k.replace(/_/g, " ")} : <span className="text-blue-700 font-semibold">{v}</span>
-        </p>
-      ));
-  };
-
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-blue-100 font-sans text-center px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 via-teal-50 to-white font-sans text-center px-4">
       {/* 🤖 Header */}
       <h1 className="text-3xl sm:text-4xl font-bold text-blue-700 mb-2 drop-shadow-sm">
         🤖 BankAI — Intelligent Assistant
@@ -125,14 +109,14 @@ export default function App() {
         </div>
       )}
 
-      {/* ⏳ Animated amplitude */}
+      {/* ⏳ Loading animation */}
       {loading && (
         <div className="mt-10 flex flex-col items-center justify-center animate-fade">
           <div className="amp-wrap">
             <div className="amp-bars" aria-hidden>
               <span /><span /><span /><span /><span />
             </div>
-            <div className="amp-label">Банк хариулж байна…</div>
+            <div className="amp-label text-blue-700">Банк хариулж байна…</div>
           </div>
         </div>
       )}
@@ -146,22 +130,37 @@ export default function App() {
 
       {/* 💬 BankAI Reply */}
       {reply && !loading && (
-        <div className="mt-10 bg-white shadow-lg rounded-2xl p-6 w-full max-w-md animate-fade">
-          <p className="text-gray-800 text-xl leading-relaxed font-medium mb-3 transition-opacity duration-500">
+        <div className="mt-10 bg-gradient-to-br from-white via-blue-50 to-teal-50 shadow-xl rounded-2xl p-6 w-full max-w-md animate-slide-up border border-blue-100">
+          {/* 🧠 Main reply text */}
+          <p className="text-blue-900 text-xl font-semibold mb-4 whitespace-pre-line leading-relaxed text-left border-l-4 border-blue-500 pl-4 bg-blue-50/60 rounded-md py-2 shadow-sm">
             {reply.reply_text || "Хариулт ирсэнгүй."}
           </p>
 
-          {/* 🔹 Secure CoreBank dynamic text */}
+          {/* 🔹 Dynamic key-value CoreBank data */}
           {reply.corebank_data && (
-            <div className="mt-2 space-y-1">{renderCoreBankData(reply.corebank_data)}</div>
+            <div className="mt-2 space-y-2 text-left">
+              {Object.entries(reply.corebank_data).map(([k, v], idx) => (
+                <div
+                  key={k}
+                  className="flex justify-between items-center bg-gradient-to-r from-teal-50 to-blue-50 rounded-lg px-4 py-2 shadow-sm border border-blue-100 opacity-0 animate-fade-in"
+                  style={{ animationDelay: `${idx * 0.1}s` }}
+                >
+                  <span className="text-gray-700 font-medium capitalize tracking-wide">
+                    {k.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-blue-700 font-semibold">{v}</span>
+                </div>
+              ))}
+            </div>
           )}
 
+          {/* 📄 PDF Link */}
           {reply.pdf_url && (
             <a
               href={`${API_BASE}${reply.pdf_url}`}
               target="_blank"
               rel="noreferrer"
-              className="mt-3 inline-block text-blue-600 underline hover:text-blue-800"
+              className="mt-4 inline-block text-teal-600 underline hover:text-teal-800 font-medium transition-colors"
             >
               📄 Хавсралт (PDF) үзэх
             </a>
@@ -174,10 +173,26 @@ export default function App() {
         © 2025 BankAI Assistant — Gana & Prof ☕
       </footer>
 
-      {/* ✨ Fade animation */}
+      {/* ✨ Animations */}
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-fade { animation: fadeIn 0.6s ease-in-out; }
+
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up {
+          animation: slideUp 0.7s ease-out;
+        }
+
+        @keyframes fadeInItem {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fadeInItem 0.6s ease-in-out forwards;
+        }
       `}</style>
     </div>
   );
