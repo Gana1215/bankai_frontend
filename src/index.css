@@ -2,7 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 🌐 Global styles */
 body {
   font-family: 'Noto Sans MN', sans-serif;
   background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+  color: #1e293b; /* slate-800 */
+}
+
+/* 💫 Glass animations */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-slide-up {
+  animation: slideUp 0.7s ease-out;
+}
+
+@keyframes fadeInItem {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fadeInItem 0.6s ease-in-out forwards;
+}
+
+/* 🔇 Scrollbar hidden (for chat view) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 🔊 Speaker wave animation (for toast + typing) */
+@keyframes pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+}
+.wave {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: pulse 1.2s infinite ease-in-out;
+}
+.wave1 {
+  animation-delay: 0s;
+}
+.wave2 {
+  animation-delay: 0.6s;
 }

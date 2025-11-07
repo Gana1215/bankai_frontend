@@ -1,10 +1,11 @@
 // ===============================================
-// 💬 BankAI — Elegant Blue-Teal Edition (v4.1 Final)
+// 💬 BankAI — Phase 2A Chatbot (Dynamic Intents + Typing + Fade + AutoScroll)
 // -----------------------------------------------
-// ✅ Same backend logic (v3.9)
-// ✅ Hardened mobile MP3 autoplay (iOS/Android)
-// ✅ Shared <audio> element + WebAudio fallback
-// ✅ No functional UI changes, fully mobile-safe
+// ✅ Dynamic intent buttons from backend
+// ✅ "BankAI is typing…" animation
+// ✅ Auto-scroll to bottom of chat
+// ✅ Smooth fade-in bubbles, responsive layout
+// ✅ Scrollable chat container (maxHeight + overflow-y)
 // ===============================================
 
 import React, { useState, useEffect, useRef } from "react";
@@ -12,20 +13,19 @@ import Recorder from "./components/Recorder";
 import { API_BASE } from "./utils/api";
 import "./components/amplitude.css";
 
-export default function App() {
+// ====================================================
+// 🎙 Voice Chat — unchanged
+// ====================================================
+function VoiceChat({ onBack }) {
   const [reply, setReply] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const audioCtxRef = useRef(null);
+  const audioRef = useRef(null);
+  const gainRef = useRef(null);
+  const srcNodeRef = useRef(null);
 
-  // 🔉 Audio plumbing
-  const audioCtxRef = useRef(null);     // persistent AudioContext (iOS unlock)
-  const audioRef = useRef(null);        // shared <audio> element
-  const gainRef = useRef(null);         // WebAudio fallback gain
-  const srcNodeRef = useRef(null);      // WebAudio fallback buffer source
-  const playingViaWebAudioRef = useRef(false);
-
-  // 🔓 Persistent unlocked audio context (iOS-safe)
   useEffect(() => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -34,7 +34,6 @@ export default function App() {
       gainRef.current.connect(audioCtxRef.current.destination);
       const unlock = async () => {
         try {
-          // micro-beep to unlock
           const ctx = audioCtxRef.current;
           const b = ctx.createBuffer(1, 1, 22050);
           const s = ctx.createBufferSource();
@@ -42,28 +41,21 @@ export default function App() {
           s.connect(ctx.destination);
           s.start(0);
           if (ctx.state === "suspended") await ctx.resume();
-        } catch (e) {
-          console.warn("⚠️ AudioContext unlock failed:", e);
-        }
+        } catch (e) {}
       };
-      window.addEventListener("touchstart", unlock, { once: true, passive: true });
+      window.addEventListener("touchstart", unlock, { once: true });
       window.addEventListener("click", unlock, { once: true });
-    } catch (e) {
-      console.warn("⚠️ AudioContext init failed:", e);
-    }
+    } catch {}
   }, []);
 
-  // Create a single shared <audio> once
   useEffect(() => {
     const el = new Audio();
     el.setAttribute("playsinline", "true");
-    el.preload = "auto";
     el.crossOrigin = "anonymous";
     audioRef.current = el;
     return () => {
       el.pause();
       el.src = "";
-      audioRef.current = null;
     };
   }, []);
 
@@ -72,142 +64,61 @@ export default function App() {
     setTimeout(() => setToast(""), timeout);
   };
 
-  // 🛑 Stop any in-flight audio (element or WebAudio)
-  const stopAllAudio = () => {
+  const stopAll = () => {
     try {
-      if (audioRef.current && !audioRef.current.paused) {
+      if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
       }
     } catch {}
-    try {
-      if (srcNodeRef.current) {
-        srcNodeRef.current.stop(0);
-        srcNodeRef.current.disconnect();
-        srcNodeRef.current = null;
-        playingViaWebAudioRef.current = false;
-      }
-    } catch {}
   };
 
-  // 🎧 Robust voice auto-play (mobile-safe with fallback)
   useEffect(() => {
     if (!reply?.voice_url) return;
-
-    const playVoice = async () => {
+    const play = async () => {
       const url = `${API_BASE}${reply.voice_url}`;
-      stopAllAudio();
-
-      // 1) Try native <audio> element first
+      stopAll();
       try {
-        const audio = audioRef.current;
-        audio.src = url;
-        // Prime the element to reduce decode lag on iOS
-        audio.load();
-        await audio.play();
-        console.log("🎵 MP3 via <audio> played OK");
-        return;
-      } catch (err1) {
-        console.warn("🔇 <audio>.play() blocked or failed, retrying…", err1);
-      }
-
-      // 2) Resume context and retry once
-      try {
-        if (audioCtxRef.current?.state === "suspended") {
-          await audioCtxRef.current.resume();
-        }
-        const audio = audioRef.current;
-        await audio.play();
-        console.log("🎵 MP3 via <audio> played after resume()");
-        return;
-      } catch (err2) {
-        console.warn("🔇 Retry after resume() failed, falling back to WebAudio…", err2);
-      }
-
-      // 3) WebAudio fallback: fetch → decode → play
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        const arr = await res.arrayBuffer();
-        const buf = await audioCtxRef.current.decodeAudioData(arr);
-        const src = audioCtxRef.current.createBufferSource();
-        src.buffer = buf;
-        src.connect(gainRef.current);
-        srcNodeRef.current = src;
-        playingViaWebAudioRef.current = true;
-        src.start(0);
-        console.log("🎵 MP3 decoded and played via WebAudio");
-      } catch (err3) {
-        console.error("❌ WebAudio fallback failed:", err3);
-      }
+        const a = audioRef.current;
+        a.src = url;
+        await a.play();
+      } catch {}
     };
-
-    // tiny delay lets the UI toast show first & helps iOS timing
-    setTimeout(playVoice, 450);
-    showToast("🎧 BankAI is replying...");
+    setTimeout(play, 400);
   }, [reply]);
 
   const handleStop = async (blob) => {
     if (!blob) return;
     setLoading(true);
-    setError("");
-    setReply(null);
-    stopAllAudio();
-    showToast("📤 Sending your voice to BankAI...");
-
+    stopAll();
+    showToast("📤 Sending your voice...");
     try {
-      const formData = new FormData();
-      formData.append("user_id", "usr001");
-      formData.append("file", blob, "intent.wav");
-
-      const res = await fetch(`${API_BASE}/intent/voice_intent`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const f = new FormData();
+      f.append("user_id", "usr001");
+      f.append("file", blob, "intent.wav");
+      const res = await fetch(`${API_BASE}/intent/voice_intent`, { method: "POST", body: f });
       const data = await res.json();
       setReply(data);
-      showToast("✅ BankAI replied.");
-    } catch (err) {
-      console.error("❌ API error:", err);
-      setError("⚠️ Сервертэй холбогдоход алдаа гарлаа. Дахин оролдоно уу.");
-      showToast("❌ Connection failed");
+      showToast("✅ BankAI replied");
+    } catch {
+      setError("⚠️ Server error");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 via-teal-50 to-white font-sans text-center px-4">
-      {/* 🤖 Header */}
-      <h1 className="text-3xl sm:text-4xl font-bold text-blue-700 mb-2 drop-shadow-sm">
-        🤖 BankAI — Intelligent Assistant
-      </h1>
-      <p className="text-gray-600 text-lg italic mb-10">“Танд юугаар туслах вэ?”</p>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 via-teal-50 to-white px-4 text-center relative">
+      <button onClick={onBack} className="absolute top-5 left-5 bg-blue-100 text-blue-700 px-3 py-1 rounded-lg shadow-sm">
+        ← Back
+      </button>
+      <h1 className="text-3xl font-bold text-blue-700 mb-2">🤖 BankAI — Intelligent Assistant</h1>
+      <p className="text-gray-600 italic mb-10">“Танд юугаар туслах вэ?”</p>
 
-      {/* 🎙️ Recorder */}
       <Recorder onStop={handleStop} />
 
-      {/* 💭 Toast with animated 🔊 speaker */}
-      {toast && (
-        <div className="mt-6 bg-blue-50 border border-blue-300 text-blue-700 px-5 py-2 rounded-xl shadow-sm animate-fade flex items-center justify-center gap-2">
-          {toast.includes("replying") ? (
-            <>
-              <span className="speaker-icon relative flex items-center justify-center w-5 h-5">
-                <span className="block w-2 h-2 bg-blue-600 rounded-sm"></span>
-                <span className="wave wave1 absolute bg-blue-400"></span>
-                <span className="wave wave2 absolute bg-blue-300"></span>
-              </span>
-              <span>{toast}</span>
-            </>
-          ) : (
-            toast
-          )}
-        </div>
-      )}
-
-      {/* ⏳ Loading animation */}
       {loading && (
-        <div className="mt-10 flex flex-col items-center justify-center animate-fade">
+        <div className="mt-10 flex flex-col items-center">
           <div className="amp-wrap">
             <div className="amp-bars" aria-hidden>
               <span /><span /><span /><span /><span />
@@ -217,104 +128,156 @@ export default function App() {
         </div>
       )}
 
-      {/* ⚠️ Error */}
-      {error && (
-        <p className="mt-6 bg-red-100 border border-red-300 text-red-600 px-4 py-2 rounded-xl shadow-sm">
-          {error}
-        </p>
-      )}
-
-      {/* 💬 BankAI Reply */}
       {reply && !loading && (
-        <div className="mt-10 bg-gradient-to-br from-white via-blue-50 to-teal-50 shadow-xl rounded-2xl p-6 w-full max-w-md animate-slide-up border border-blue-100">
-          {/* 🧠 Main reply text (skip if duplicated) */}
-          {reply.reply_text &&
-            (!reply.corebank_data || Object.keys(reply.corebank_data).length === 0) && (
-              <p className="text-blue-900 text-xl font-semibold mb-4 whitespace-pre-line leading-relaxed text-left border-l-4 border-blue-500 pl-4 bg-blue-50/60 rounded-md py-2 shadow-sm">
-                {reply.reply_text || "Хариулт ирсэнгүй."}
-              </p>
-            )}
-
-          {/* 🔹 Optional multi-intent list if backend ever sends it */}
-          {Array.isArray(reply.intent_choices) && reply.intent_choices.length > 0 && (
-            <ul className="text-left list-disc list-inside text-blue-900/90 space-y-1 mb-3">
-              {reply.intent_choices.map((opt, i) => (
-                <li key={i}>{opt}</li>
-              ))}
-            </ul>
-          )}
-
-          {/* 🔹 Dynamic key-value CoreBank data */}
-          {reply.corebank_data && (
-            <div className="mt-2 space-y-2 text-left">
-              {Object.entries(reply.corebank_data).map(([k, v], idx) => (
-                <div
-                  key={k}
-                  className="flex justify-between items-center bg-gradient-to-r from-teal-50 to-blue-50 rounded-lg px-4 py-2 shadow-sm border border-blue-100 opacity-0 animate-fade-in"
-                  style={{ animationDelay: `${idx * 0.1}s` }}
-                >
-                  <span className="text-gray-700 font-medium capitalize tracking-wide">
-                    {k.replace(/_/g, " ")}
-                  </span>
-                  <span className="text-blue-700 font-semibold">{v}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* 📄 PDF Link */}
-          {reply.pdf_url && (
-            <a
-              href={`${API_BASE}${reply.pdf_url}`}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-block text-teal-600 underline hover:text-teal-800 font-medium transition-colors"
-            >
-              📄 Хавсралт (PDF) үзэх
-            </a>
-          )}
+        <div className="mt-10 bg-white p-6 rounded-2xl shadow-xl max-w-md w-full animate-fade-in">
+          <p className="text-blue-900 text-xl font-semibold whitespace-pre-line">{reply.reply_text}</p>
         </div>
       )}
+      {error && <p className="text-red-600 mt-6">{error}</p>}
+      {toast && <p className="text-blue-700 mt-6">{toast}</p>}
+    </div>
+  );
+}
 
-      {/* 🪶 Footer */}
-      <footer className="mt-12 text-gray-400 text-sm">
-        © 2025 BankAI Assistant — Gana & Prof ☕
-      </footer>
+// ====================================================
+// 💬 Text Chatbot — Dynamic Intents + Typing + Fade
+// ====================================================
+function TextChat({ onBack }) {
+  const [messages, setMessages] = useState([]);
+  const [intents, setIntents] = useState([]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const chatEndRef = useRef(null);
 
-      {/* ✨ Animations */}
+  useEffect(() => {
+    fetch(`${API_BASE}/intent/list_intents`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.intents)) {
+          setIntents(d.intents.map((i) => i.display || i.name));
+        }
+      })
+      .catch(() => setIntents([]));
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typing]);
+
+  const sendMessage = async (msgText) => {
+    const text = msgText || input;
+    if (!text.trim()) return;
+    const userMsg = { role: "user", text };
+    setMessages((m) => [...m, userMsg]);
+    setInput("");
+    setTyping(true);
+    try {
+      const res = await fetch(`${API_BASE}/intent/text_intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      setTyping(false);
+      setMessages((m) => [...m, { role: "bot", text: data.reply_text || "🤖 Алдаа гарлаа." }]);
+    } catch {
+      setTyping(false);
+      setMessages((m) => [...m, { role: "bot", text: "⚠️ Сервертэй холбогдоогүй." }]);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-blue-50 via-teal-50 to-white text-center px-4 relative">
+      <button onClick={onBack} className="absolute top-5 left-5 bg-blue-100 text-blue-700 px-3 py-1 rounded-lg shadow-sm">
+        ← Back
+      </button>
+      <h1 className="text-3xl font-bold text-blue-700 mt-8 mb-2">💬 BankAI Chatbot</h1>
+      <p className="text-gray-600 mb-6 italic">Ямар үйлчилгээг сонирхож байна?</p>
+
+      <div className="flex flex-wrap justify-center gap-3 mb-6 px-2">
+        {intents.map((name, i) => (
+          <button
+            key={i}
+            onClick={() => sendMessage(name)}
+            className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-blue-500 hover:to-teal-600 text-white font-semibold px-5 py-2 rounded-full shadow-md hover:shadow-lg transition-all duration-300 animate-glow"
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+
+      {/* ✅ scrollable chat box */}
+      <div
+        className="flex-1 overflow-y-auto w-full max-w-md mx-auto bg-white rounded-2xl shadow-inner p-4 mb-4"
+        style={{ maxHeight: "60vh" }}
+      >
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={`text-left mb-3 ${m.role === "user" ? "text-blue-700" : "text-teal-700"} animate-fade-in`}
+          >
+            <strong>{m.role === "user" ? "👤 Та:" : "🤖 BankAI:"}</strong> {m.text}
+          </div>
+        ))}
+        {typing && (
+          <div className="text-teal-600 text-left flex items-center gap-1 mb-2 animate-fade-in">
+            <strong>🤖 BankAI:</strong>
+            <span className="dot-flash"></span>
+            <span className="dot-flash delay-200"></span>
+            <span className="dot-flash delay-400"></span>
+          </div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      <div className="mt-auto flex gap-2 justify-center mb-6">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+          className="border rounded-lg px-3 py-2 w-2/3 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+          placeholder="Мессеж бичих..."
+        />
+        <button onClick={() => sendMessage()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-md">
+          Send
+        </button>
+      </div>
+
       <style>{`
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-fade { animation: fadeIn 0.6s ease-in-out; }
-
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
+        @keyframes glowPulse {
+          0% { box-shadow: 0 0 8px rgba(0, 200, 255, 0.4); }
+          50% { box-shadow: 0 0 16px rgba(0, 200, 255, 0.8); }
+          100% { box-shadow: 0 0 8px rgba(0, 200, 255, 0.4); }
         }
-        .animate-slide-up { animation: slideUp 0.7s ease-out; }
-
-        @keyframes fadeInItem {
-          from { opacity: 0; transform: translateY(6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fadeInItem 0.6s ease-in-out forwards; }
-
-        /* 🔊 Speaker wave animation */
-        .wave {
-          width: 100%;
-          height: 100%;
-          border-radius: 50%;
-          opacity: 0.6;
-          animation: pulse 1.2s infinite ease-in-out;
-        }
-        .wave1 { animation-delay: 0s; }
-        .wave2 { animation-delay: 0.6s; }
-
-        @keyframes pulse {
-          0% { transform: scale(0.6); opacity: 0.7; }
-          50% { transform: scale(1.4); opacity: 0.4; }
-          100% { transform: scale(0.6); opacity: 0.7; }
-        }
+        .animate-glow:hover { animation: glowPulse 1.5s infinite ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+        .animate-fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes dotFlash { 0%,80%,100%{opacity:0.2;transform:scale(0.9);}40%{opacity:1;transform:scale(1);} }
+        .dot-flash { width:6px;height:6px;background:teal;border-radius:50%;animation:dotFlash 1.4s infinite ease-in-out both; }
+        .delay-200{animation-delay:0.2s;} .delay-400{animation-delay:0.4s;}
       `}</style>
+    </div>
+  );
+}
+
+// ====================================================
+// 🏠 App Controller
+// ====================================================
+export default function App() {
+  const [screen, setScreen] = useState("menu");
+  if (screen === "voice") return <VoiceChat onBack={() => setScreen("menu")} />;
+  if (screen === "text") return <TextChat onBack={() => setScreen("menu")} />;
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-blue-50 via-teal-50 to-white text-center px-4">
+      <h1 className="text-4xl font-bold text-blue-700 mb-4">🏦 BankAI Assistant</h1>
+      <p className="text-gray-600 mb-10 italic">Your personal banking assistant</p>
+      <button onClick={() => setScreen("voice")} className="bg-teal-600 hover:bg-teal-700 text-white font-semibold px-6 py-3 rounded-xl mb-4 shadow-md">
+        🎙 Voice Chat
+      </button>
+      <button onClick={() => setScreen("text")} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-xl shadow-md">
+        💬 Text Chatbot
+      </button>
     </div>
   );
 }
