@@ -1,9 +1,10 @@
 // ===============================================
-// 💬 BankAI — Elegant Blue-Teal Edition (v4.0 Final)
+// 💬 BankAI — Elegant Blue-Teal Edition (v4.1 Final)
 // -----------------------------------------------
 // ✅ Same backend logic (v3.9)
-// ✅ Adds animated 🔊 speaker in reply toast
-// ✅ No functional changes, fully mobile-safe
+// ✅ Hardened mobile MP3 autoplay (iOS/Android)
+// ✅ Shared <audio> element + WebAudio fallback
+// ✅ No functional UI changes, fully mobile-safe
 // ===============================================
 
 import React, { useState, useEffect, useRef } from "react";
@@ -16,27 +17,54 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const audioCtxRef = useRef(null);
-  const audioRef = useRef(null); // 🔊 shared playback element
+
+  // 🔉 Audio plumbing
+  const audioCtxRef = useRef(null);     // persistent AudioContext (iOS unlock)
+  const audioRef = useRef(null);        // shared <audio> element
+  const gainRef = useRef(null);         // WebAudio fallback gain
+  const srcNodeRef = useRef(null);      // WebAudio fallback buffer source
+  const playingViaWebAudioRef = useRef(false);
 
   // 🔓 Persistent unlocked audio context (iOS-safe)
   useEffect(() => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       audioCtxRef.current = new AudioCtx();
-      const unlock = () => {
-        const buffer = audioCtxRef.current.createBuffer(1, 1, 22050);
-        const src = audioCtxRef.current.createBufferSource();
-        src.buffer = buffer;
-        src.connect(audioCtxRef.current.destination);
-        src.start(0);
-        if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      gainRef.current = audioCtxRef.current.createGain();
+      gainRef.current.connect(audioCtxRef.current.destination);
+      const unlock = async () => {
+        try {
+          // micro-beep to unlock
+          const ctx = audioCtxRef.current;
+          const b = ctx.createBuffer(1, 1, 22050);
+          const s = ctx.createBufferSource();
+          s.buffer = b;
+          s.connect(ctx.destination);
+          s.start(0);
+          if (ctx.state === "suspended") await ctx.resume();
+        } catch (e) {
+          console.warn("⚠️ AudioContext unlock failed:", e);
+        }
       };
-      window.addEventListener("touchstart", unlock, { once: true });
+      window.addEventListener("touchstart", unlock, { once: true, passive: true });
       window.addEventListener("click", unlock, { once: true });
     } catch (e) {
-      console.warn("⚠️ AudioContext unlock failed:", e);
+      console.warn("⚠️ AudioContext init failed:", e);
     }
+  }, []);
+
+  // Create a single shared <audio> once
+  useEffect(() => {
+    const el = new Audio();
+    el.setAttribute("playsinline", "true");
+    el.preload = "auto";
+    el.crossOrigin = "anonymous";
+    audioRef.current = el;
+    return () => {
+      el.pause();
+      el.src = "";
+      audioRef.current = null;
+    };
   }, []);
 
   const showToast = (msg, timeout = 2500) => {
@@ -44,20 +72,77 @@ export default function App() {
     setTimeout(() => setToast(""), timeout);
   };
 
-  // 🎧 Voice auto-play (safe for mobile)
+  // 🛑 Stop any in-flight audio (element or WebAudio)
+  const stopAllAudio = () => {
+    try {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    } catch {}
+    try {
+      if (srcNodeRef.current) {
+        srcNodeRef.current.stop(0);
+        srcNodeRef.current.disconnect();
+        srcNodeRef.current = null;
+        playingViaWebAudioRef.current = false;
+      }
+    } catch {}
+  };
+
+  // 🎧 Robust voice auto-play (mobile-safe with fallback)
   useEffect(() => {
     if (!reply?.voice_url) return;
+
     const playVoice = async () => {
+      const url = `${API_BASE}${reply.voice_url}`;
+      stopAllAudio();
+
+      // 1) Try native <audio> element first
       try {
-        if (!audioRef.current) audioRef.current = new Audio();
-        audioRef.current.src = `${API_BASE}${reply.voice_url}`;
-        await audioRef.current.play();
-        console.log("🎵 Static voice played OK (mobile-safe)");
-      } catch (err) {
-        console.warn("🔇 Voice auto-play blocked:", err);
+        const audio = audioRef.current;
+        audio.src = url;
+        // Prime the element to reduce decode lag on iOS
+        audio.load();
+        await audio.play();
+        console.log("🎵 MP3 via <audio> played OK");
+        return;
+      } catch (err1) {
+        console.warn("🔇 <audio>.play() blocked or failed, retrying…", err1);
+      }
+
+      // 2) Resume context and retry once
+      try {
+        if (audioCtxRef.current?.state === "suspended") {
+          await audioCtxRef.current.resume();
+        }
+        const audio = audioRef.current;
+        await audio.play();
+        console.log("🎵 MP3 via <audio> played after resume()");
+        return;
+      } catch (err2) {
+        console.warn("🔇 Retry after resume() failed, falling back to WebAudio…", err2);
+      }
+
+      // 3) WebAudio fallback: fetch → decode → play
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        const arr = await res.arrayBuffer();
+        const buf = await audioCtxRef.current.decodeAudioData(arr);
+        const src = audioCtxRef.current.createBufferSource();
+        src.buffer = buf;
+        src.connect(gainRef.current);
+        srcNodeRef.current = src;
+        playingViaWebAudioRef.current = true;
+        src.start(0);
+        console.log("🎵 MP3 decoded and played via WebAudio");
+      } catch (err3) {
+        console.error("❌ WebAudio fallback failed:", err3);
       }
     };
-    setTimeout(playVoice, 600);
+
+    // tiny delay lets the UI toast show first & helps iOS timing
+    setTimeout(playVoice, 450);
     showToast("🎧 BankAI is replying...");
   }, [reply]);
 
@@ -66,6 +151,7 @@ export default function App() {
     setLoading(true);
     setError("");
     setReply(null);
+    stopAllAudio();
     showToast("📤 Sending your voice to BankAI...");
 
     try {
@@ -148,6 +234,15 @@ export default function App() {
                 {reply.reply_text || "Хариулт ирсэнгүй."}
               </p>
             )}
+
+          {/* 🔹 Optional multi-intent list if backend ever sends it */}
+          {Array.isArray(reply.intent_choices) && reply.intent_choices.length > 0 && (
+            <ul className="text-left list-disc list-inside text-blue-900/90 space-y-1 mb-3">
+              {reply.intent_choices.map((opt, i) => (
+                <li key={i}>{opt}</li>
+              ))}
+            </ul>
+          )}
 
           {/* 🔹 Dynamic key-value CoreBank data */}
           {reply.corebank_data && (
