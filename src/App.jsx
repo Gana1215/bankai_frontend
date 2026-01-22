@@ -294,7 +294,7 @@ function VoiceChat({ onBack }) {
       {/* ================================================= */}
       {/* ⭐ BACKEND TIMING PANEL (MOVED: under toggle)      */}
       {/* ================================================= */}
-      {SHOW_TIMING && sttMode === "backend" && backendDemo && !loading && (
+      {sttMode === "backend" && backendDemo && !loading && (
         <div className="w-full max-w-md bg-white/80 border border-blue-100 rounded-2xl p-4 shadow-sm mb-4 text-left">
           <div className="text-[11px] font-mono text-gray-700 whitespace-pre-line">
             🎙️ Transcription: {fmt(backendDemo.stt_ms)} | 🤖 Intent + Reply:{" "}
