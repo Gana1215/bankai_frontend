@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.vite/
+.DS_Store
+.env
+.env.*
+
+# Never commit models
+public/models/**
+**/*.onnx
+**/*.pt
+**/*.bin
+**/*.safetensors
+
+# Never commit archives
+*.tgz
+*.zip
+
+# Optional: ignore vendor entirely (since you removed it)
+vendor/

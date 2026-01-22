@@ -1,0 +1,159 @@
+.
+├── .DS_Store
+├── .env
+├── .gitignore
+├── README.md
+├── eslint.config.js
+├── index.html
+├── package
+│   ├── LICENSE
+│   ├── README.md
+│   ├── package.json
+│   ├── src
+│   │   ├── backends
+│   │   │   └── onnx.js
+│   │   ├── configs.js
+│   │   ├── env.js
+│   │   ├── models.js
+│   │   ├── pipelines.js
+│   │   ├── processors.js
+│   │   ├── tokenizers.js
+│   │   ├── transformers.js
+│   │   └── utils
+│   │       ├── audio.js
+│   │       ├── core.js
+│   │       ├── data-structures.js
+│   │       ├── generation.js
+│   │       ├── hub.js
+│   │       ├── image.js
+│   │       ├── maths.js
+│   │       └── tensor.js
+│   └── types
+│       ├── backends
+│       │   ├── onnx.d.ts
+│       │   └── onnx.d.ts.map
+│       ├── configs.d.ts
+│       ├── configs.d.ts.map
+│       ├── env.d.ts
+│       ├── env.d.ts.map
+│       ├── models.d.ts
+│       ├── models.d.ts.map
+│       ├── pipelines.d.ts
+│       ├── pipelines.d.ts.map
+│       ├── processors.d.ts
+│       ├── processors.d.ts.map
+│       ├── tokenizers.d.ts
+│       ├── tokenizers.d.ts.map
+│       ├── transformers.d.ts
+│       ├── transformers.d.ts.map
+│       └── utils
+│           ├── audio.d.ts
+│           ├── audio.d.ts.map
+│           ├── core.d.ts
+│           ├── core.d.ts.map
+│           ├── data-structures.d.ts
+│           ├── data-structures.d.ts.map
+│           ├── generation.d.ts
+│           ├── generation.d.ts.map
+│           ├── hub.d.ts
+│           ├── hub.d.ts.map
+│           ├── image.d.ts
+│           ├── image.d.ts.map
+│           ├── maths.d.ts
+│           ├── maths.d.ts.map
+│           ├── tensor.d.ts
+│           └── tensor.d.ts.map
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── public
+│   ├── .DS_Store
+│   ├── models
+│   │   ├── .DS_Store
+│   │   ├── generation_config.json
+│   │   ├── intent_model.joblib
+│   │   └── onnx_tiny_mn_fp32
+│   │       ├── added_tokens.json
+│   │       ├── config.json
+│   │       ├── decoder_model.onnx
+│   │       ├── decoder_with_past_model.onnx
+│   │       ├── encoder_model.onnx
+│   │       ├── generation_config.json
+│   │       ├── merges.txt
+│   │       ├── normalizer.json
+│   │       ├── ort_config.json
+│   │       ├── preprocessor_config.json
+│   │       ├── special_tokens_map.json
+│   │       ├── tokenizer.json
+│   │       ├── tokenizer_config.json
+│   │       └── vocab.json
+│   ├── ort
+│   │   ├── ort-wasm-simd-threaded.jsep.js
+│   │   ├── ort-wasm-simd-threaded.jsep.wasm
+│   │   ├── ort-wasm-simd-threaded.wasm
+│   │   ├── ort-wasm-simd.jsep.wasm
+│   │   ├── ort-wasm-simd.wasm
+│   │   ├── ort-wasm-threaded.js
+│   │   ├── ort-wasm-threaded.wasm
+│   │   ├── ort-wasm-threaded.worker.js
+│   │   ├── ort-wasm.wasm
+│   │   ├── ort-web.es5.min.js
+│   │   ├── ort-web.es5.min.js.map
+│   │   ├── ort-web.es6.min.js
+│   │   ├── ort-web.es6.min.js.map
+│   │   ├── ort-web.js
+│   │   ├── ort-web.min.js
+│   │   ├── ort-web.min.js.map
+│   │   ├── ort-web.node.js
+│   │   ├── ort-web.node.js.map
+│   │   ├── ort.es5.min.js
+│   │   ├── ort.es5.min.js.map
+│   │   ├── ort.es6.min.js
+│   │   ├── ort.es6.min.js.map
+│   │   ├── ort.js
+│   │   ├── ort.min.js
+│   │   ├── ort.min.js.map
+│   │   ├── ort.wasm-core.min.js
+│   │   ├── ort.wasm-core.min.js.map
+│   │   ├── ort.wasm.min.js
+│   │   ├── ort.wasm.min.js.map
+│   │   ├── ort.webgl.min.js
+│   │   ├── ort.webgl.min.js.map
+│   │   ├── ort.webgpu.min.js
+│   │   └── ort.webgpu.min.js.map
+│   ├── static
+│   │   ├──  manifest.json
+│   │   ├── .DS_Store
+│   │   └── icons
+│   ├── test.wav
+│   ├── vite.svg
+│   └── whisper.worker.js
+├── special_tokens_map.json
+├── src
+│   ├── .DS_Store
+│   ├── App.css
+│   ├── App.jsx
+│   ├── assets
+│   │   ├── react.svg
+│   │   └── vite.config.js
+│   ├── components
+│   │   ├── Bubble.jsx
+│   │   ├── IntentChips.jsx
+│   │   ├── Recorder.jsx
+│   │   ├── TextChat.jsx
+│   │   ├── TypingBubble.jsx
+│   │   ├── amplitude.css
+│   │   └── index.js
+│   ├── hooks
+│   │   └── useOnnxTranscriber.js
+│   ├── index.css
+│   ├── main.jsx
+│   ├── tailwind_setup_instruction.py
+│   └── utils
+│       └── api.js
+├── tailwind.config.js
+├── tree.txt
+├── vite.config.js
+└── xenova-transformers-2.17.2.tgz
+
+19 directories, 138 files

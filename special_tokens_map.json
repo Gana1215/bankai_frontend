@@ -1,0 +1,6 @@
+{
+  "bos_token": "<|startoftranscript|>",
+  "eos_token": "<|endoftranscript|>",
+  "pad_token": "<|pad|>",
+  "unk_token": "<|unk|>"
+}
