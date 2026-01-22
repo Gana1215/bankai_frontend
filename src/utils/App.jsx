@@ -1,15 +1,11 @@
-// src/App.jsx ✅ FINAL (Worker removed, WebGPU hook kept, StatusPanel unchanged)
-// NOTE: This file assumes your hook returns:
-// { ready, busy, statusText, progress, transcribe }
+// src/App.jsx ✅ FINAL (Single Source of Truth Mode + Clear Display + Toggle Works Everywhere)
+// NOTE: Hook returns: { ready, busy, statusText, progress, transcribe }
 
 import React, { useState, useEffect, useRef } from "react";
 import Recorder from "./components/Recorder";
 import { API_BASE } from "./utils/api";
 import useOnnxTranscriber from "./hooks/useOnnxTranscriber";
 import "./components/amplitude.css";
-
-const TRANS_MODE = import.meta.env.VITE_TRANS_MODE || "1";
-// "1" = backend (default), "0" = ONNX frontend
 
 // ====================================================
 // Helpers
@@ -76,18 +72,25 @@ function StatusPanel({ ready, busy, statusText, progress }) {
 // ====================================================
 // 🎙 VoiceChat
 // ====================================================
-function VoiceChat({ onBack }) {
+function VoiceChat({ onBack, transMode, setTransMode }) {
   const [reply, setReply] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [useTestWav, setUseTestWav] = useState(false);
 
-  // DEMO PATCH — backend timing panel
+  // Timing panel (backend)
   const [demo, setDemo] = useState(null);
 
   const audioRef = useRef(null);
-  const { ready, busy, statusText, progress, transcribe } = useOnnxTranscriber();
+
+  // ✅ Only boot ONNX hook when local mode is selected
+  const hook =
+    transMode === "0"
+      ? useOnnxTranscriber()
+      : { ready: false, busy: false, statusText: "", progress: null, transcribe: null };
+
+  const { ready, busy, statusText, progress, transcribe } = hook;
 
   useEffect(() => {
     audioRef.current = safeCreateAudio();
@@ -116,6 +119,12 @@ function VoiceChat({ onBack }) {
     }, 400);
   }, [reply]);
 
+  const modeLabel =
+    transMode === "0" ? "🧠 Front (Local ONNX)" : "☁️ Back (Server Whisper)";
+
+  const nextModeLabel =
+    transMode === "0" ? "Switch to Back" : "Switch to Front";
+
   // ====================================================
   const handleStop = async (blob) => {
     if (!blob) return;
@@ -136,10 +145,13 @@ function VoiceChat({ onBack }) {
     stopPlayback();
     setLoading(true);
     setDemo(null);
+    setError("");
 
     try {
-      if (TRANS_MODE === "0") {
-        // Local mode unchanged
+      if (transMode === "0") {
+        // =========================
+        // Front / Local ONNX mode
+        // =========================
         if (!ready) {
           const t0 = Date.now();
           while (!ready && Date.now() - t0 < 12000) {
@@ -151,41 +163,60 @@ function VoiceChat({ onBack }) {
             return;
           }
         }
+
         showToast("🎧 Local...");
-        const text = await transcribe(blob);
+        const text = await transcribe?.(blob);
         if (!text?.trim()) {
           showToast("⚠️ Танигдсангүй");
           setLoading(false);
           return;
         }
+
         const res = await fetch(`${API_BASE}/intent/text_intent`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
         });
-        setReply(await res.json());
+
+        const data = await res.json();
+        setReply(data);
         showToast("🤖 BankAI хариуллаа!");
       } else {
-        // Backend mode — PATCH HERE
+        // =========================
+        // Back / Server mode
+        // =========================
         showToast("📤 Server...");
         const f = new FormData();
         f.append("user_id", "usr001");
-        f.append("file", blob, "voice.wav");
+        f.append("file", blob, "voice.webm");
 
         const res = await fetch(`${API_BASE}/intent/voice_intent`, {
           method: "POST",
           body: f,
         });
 
-        const data = await res.json();
+        // ✅ SAFE parse (prevents "Unexpected end of JSON input")
+        const txt = await res.text();
+        let data = null;
+        try {
+          data = txt ? JSON.parse(txt) : null;
+        } catch {
+          console.error("❌ Non-JSON response:", res.status, txt);
+          throw new Error("Invalid JSON from backend");
+        }
+        if (!res.ok) {
+          console.error("❌ Backend error:", res.status, data);
+          throw new Error(`Backend HTTP ${res.status}`);
+        }
+
         setReply(data);
 
-        // DEMO PATCH: safe defaults
+        // ✅ Timing panel always set
         setDemo({
-          user_text: data.user_text ?? "",
-          stt_ms: data.stt_ms ?? 0,
-          processing_ms: data.processing_ms ?? 0,
-          total_ms: data.total_ms ?? 0,
+          user_text: data?.user_text ?? "",
+          stt_ms: data?.stt_ms ?? 0,
+          processing_ms: data?.processing_ms ?? 0,
+          total_ms: data?.total_ms ?? 0,
         });
 
         showToast("🤖 BankAI!");
@@ -211,13 +242,28 @@ function VoiceChat({ onBack }) {
 
       <h1 className="text-3xl font-bold text-blue-700 mb-2">🤖 BankAI — Voice Assistant</h1>
 
-      {TRANS_MODE === "0" && (
+      {/* ✅ CLEAR CURRENT MODE (exactly what you asked) */}
+      <div className="mb-3 text-[13px] font-mono text-gray-800">
+        Model Mode: <span className="font-semibold">{modeLabel}</span>
+      </div>
+
+      {/* ✅ Toggle updates the real mode state (App-level) */}
+      <button
+        onClick={() => setTransMode((m) => (m === "0" ? "1" : "0"))}
+        className="mb-5 px-4 py-2 rounded-lg shadow bg-gray-100 text-gray-700"
+        title="Switch between Front(Local) and Back(Server)"
+      >
+        {nextModeLabel}
+      </button>
+
+      {/* Local status panel only in Front mode */}
+      {transMode === "0" && (
         <div className="mb-6">
           <StatusPanel ready={ready} busy={busy} statusText={statusText} progress={progress} />
         </div>
       )}
 
-      <Recorder onStop={handleStop} />
+      <Recorder onStop={handleStop} transMode={transMode} />
 
       <button
         onClick={() => setUseTestWav((v) => !v)}
@@ -231,12 +277,12 @@ function VoiceChat({ onBack }) {
       {loading && (
         <div className="mt-8 text-blue-700">
           <div className="amp-bars"></div>
-          <p>{TRANS_MODE === "0" ? (busy ? "Transcribing..." : "Processing...") : "Processing..."}</p>
+          <p>{transMode === "0" ? (busy ? "Transcribing..." : "Processing...") : "Processing..."}</p>
         </div>
       )}
 
-      {/* DEMO PANEL — PATCH: show when demo exists, not only when user_text */}
-      {TRANS_MODE !== "0" && demo && !loading && (
+      {/* ✅ Backend timing panel */}
+      {demo && !loading && (
         <div className="mt-6 bg-white/80 p-4 rounded-2xl shadow max-w-md w-full text-left border border-blue-100">
           <div className="text-[11px] font-mono text-gray-700 whitespace-pre-line">
             🎙️ Transcription: {fmtS(demo.stt_ms)} | 🤖 Intent + Reply: {fmtS(demo.processing_ms)} | ⏳ Total:{" "}
@@ -348,8 +394,7 @@ function TextChat({ onBack }) {
             key={i}
             className={`mb-2 text-left ${m.role === "user" ? "text-blue-700" : "text-teal-700"}`}
           >
-            <strong>{m.role === "user" ? "👤 Та:" : "🤖 BankAI:"}</strong>{" "}
-            {m.text}
+            <strong>{m.role === "user" ? "👤 Та:" : "🤖 BankAI:"}</strong> {m.text}
 
             {m.role === "bot" && m.voice_url && (
               <button
@@ -387,14 +432,35 @@ function TextChat({ onBack }) {
 // ====================================================
 export default function App() {
   const [screen, setScreen] = useState("menu");
-  if (screen === "voice") return <VoiceChat onBack={() => setScreen("menu")} />;
+
+  // ✅ SINGLE SOURCE OF TRUTH MODE (App-level)
+  const MODE_DEFAULT = String(import.meta.env.VITE_TRANS_MODE || "1");
+  const [transMode, setTransMode] = useState(() => localStorage.getItem("bankai_trans_mode") || MODE_DEFAULT);
+
+  useEffect(() => {
+    localStorage.setItem("bankai_trans_mode", transMode);
+  }, [transMode]);
+
+  const modeLabel = transMode === "0" ? "🧠 Front (Local ONNX)" : "☁️ Back (Server Whisper)";
+
+  if (screen === "voice")
+    return (
+      <VoiceChat
+        onBack={() => setScreen("menu")}
+        transMode={transMode}
+        setTransMode={setTransMode}
+      />
+    );
+
   if (screen === "text") return <TextChat onBack={() => setScreen("menu")} />;
 
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-blue-50 via-teal-50 to-white text-center px-4">
       <h1 className="text-4xl font-bold text-blue-700 mb-2">🏦 BankAI Assistant</h1>
-      <p className="text-gray-600 mb-8 italic">
-        Mode: {TRANS_MODE === "0" ? "🧠 Local ONNX (WebGPU)" : "☁️ Server STT"}
+
+      {/* ✅ CLEAR CURRENT MODE ON MENU TOO */}
+      <p className="text-gray-700 mb-6 font-mono">
+        Model Mode: <span className="font-semibold">{modeLabel}</span>
       </p>
 
       <button

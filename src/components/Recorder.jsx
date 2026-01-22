@@ -1,17 +1,15 @@
 // ===============================================
-// 🎙️ Recorder.jsx — BankAI Recorder (v2.0.1 STOP FIX)
+// 🎙️ Recorder.jsx — BankAI Recorder (v2.0.2 MODE-SAFE + STOP FIX)
 // -----------------------------------------------
-// ✅ Same PCM16 WAV recording logic
-// ✅ Fixes stopRecording not reliably stopping (fallback/onstop race)
-// ✅ Finalizes blob exactly once (finalizeOnce)
-// ✅ Stops stream tracks + stops analyzer RAF + closes AudioContext
-// ✅ Keeps TRANS_MODE switch behavior intact
+// ✅ Keeps your STOP FIX logic exactly
+// ✅ Backend mode: returns RAW webm/ogg blob (NO decodeAudioData)
+// ✅ Front(Local) mode: converts to WAV PCM16
+// ✅ Recorder is record-only: App.jsx owns networking
 // ===============================================
 
 import React, { useRef, useState, useEffect } from "react";
-import { TRANS_MODE } from "../utils/api";
 
-export default function Recorder({ onStop }) {
+export default function Recorder({ onStop, transMode }) {
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
   const [level, setLevel] = useState(0);
@@ -30,7 +28,6 @@ export default function Recorder({ onStop }) {
 
   const lastErrorRef = useRef(null);
 
-  // ✅ Separate flags (fixes the race)
   const stopRequestedRef = useRef(false);
   const finalizedRef = useRef(false);
 
@@ -73,7 +70,6 @@ export default function Recorder({ onStop }) {
     await closeAudioCtx();
   };
 
-  // ✅ One finalize path (called by onstop OR fallback)
   const finalizeOnce = async (reason) => {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
@@ -82,16 +78,25 @@ export default function Recorder({ onStop }) {
     stopViz();
 
     try {
-      const blob = new Blob(audioChunksRef.current, { type: mimeRef.current });
-      const wavBlob = await convertToWav(blob);
+      const rawBlob = new Blob(audioChunksRef.current, { type: mimeRef.current });
 
-      await handleFinalBlob(wavBlob);
+      // Backend mode: no decodeAudioData
+      if (String(transMode) === "1") {
+        onStop && onStop(rawBlob);
+        setAudioUrl(URL.createObjectURL(rawBlob));
+        lastErrorRef.current = null;
+        return;
+      }
+
+      // Front(Local) mode: WAV conversion (PCM16)
+      const wavBlob = await convertToWav(rawBlob);
+      onStop && onStop(wavBlob);
       setAudioUrl(URL.createObjectURL(wavBlob));
       lastErrorRef.current = null;
     } catch (err) {
       console.error(`[RECORDER] finalizeOnce failed (${reason}):`, err);
       lastErrorRef.current = err;
-      alert("Audio decode failed. Please try again or switch browser.");
+      alert("Audio decode failed. Switch to Back mode or try a different browser.");
     } finally {
       recordingRef.current = false;
       setRecording(false);
@@ -99,7 +104,6 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // 🎙️ Start Recording
   const startRecording = async () => {
     try {
       stopRequestedRef.current = false;
@@ -107,7 +111,7 @@ export default function Recorder({ onStop }) {
       lastErrorRef.current = null;
       clearStopTimeout();
 
-      await cleanup(); // helps dev StrictMode / leftover resources
+      await cleanup();
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -135,7 +139,6 @@ export default function Recorder({ onStop }) {
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      // attach handlers BEFORE start() (avoid race)
       mediaRecorder.ondataavailable = (e) => {
         if (e?.data?.size > 0) audioChunksRef.current.push(e.data);
       };
@@ -160,7 +163,6 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // 🛑 Stop Recording (reliable)
   const stopRecording = () => {
     if (stopRequestedRef.current) {
       recordingRef.current = false;
@@ -180,7 +182,7 @@ export default function Recorder({ onStop }) {
     try {
       if (mr && mr.state === "recording") {
         try {
-          mr.requestData(); // flush last chunk
+          mr.requestData();
         } catch {}
         mr.stop();
       } else {
@@ -191,7 +193,6 @@ export default function Recorder({ onStop }) {
       finalizeOnce("stop-exception");
     }
 
-    // fallback if onstop stalls (safe now)
     clearStopTimeout();
     stopTimeoutRef.current = setTimeout(() => {
       finalizeOnce("fallback-timeout");
@@ -202,7 +203,6 @@ export default function Recorder({ onStop }) {
     stopViz();
   };
 
-  // 📊 Audio level visualization
   const visualizeLevel = () => {
     const analyser = analyserRef.current;
     if (!analyser) return;
@@ -223,7 +223,6 @@ export default function Recorder({ onStop }) {
     update();
   };
 
-  // 🧱 Convert webm → wav (PCM16)
   const convertToWav = async (blob) => {
     const audioCtx = new AudioContext();
     const buffer = await blob.arrayBuffer();
@@ -293,32 +292,6 @@ export default function Recorder({ onStop }) {
     return buffer;
   };
 
-  // 📦 Handle final WAV blob (kept conceptually intact)
-  const handleFinalBlob = async (wavBlob) => {
-    if (lastErrorRef.current) {
-      console.log("[RECORDER] ❌ blocked: prior decode error");
-      return;
-    }
-
-    onStop && onStop(wavBlob);
-
-    if (String(TRANS_MODE) === "0") {
-      console.log("🚀 TRANS_MODE=0 → Local Whisper (frontend)");
-      // App.jsx does local transcription
-    } else {
-      console.log("🎧 TRANS_MODE=1 → Backend Whisper");
-      const formData = new FormData();
-      formData.append("file", wavBlob, "input.wav");
-      const res = await fetch(`${import.meta.env.VITE_API_BASE}/transcribe`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      console.log("📝 Backend transcription:", data);
-    }
-  };
-
-  // cleanup on unmount (dev StrictMode safe)
   useEffect(() => {
     return () => {
       clearStopTimeout();
@@ -339,9 +312,7 @@ export default function Recorder({ onStop }) {
       <button
         onClick={recording ? stopRecording : startRecording}
         className={`rounded-full p-8 shadow-lg transition-all duration-300 ${
-          recording
-            ? "bg-red-500 hover:bg-red-600 scale-110"
-            : "bg-blue-500 hover:bg-blue-600"
+          recording ? "bg-red-500 hover:bg-red-600 scale-110" : "bg-blue-500 hover:bg-blue-600"
         }`}
       >
         <span className="text-white text-2xl">{recording ? "🛑" : "🎙️"}</span>
@@ -354,9 +325,7 @@ export default function Recorder({ onStop }) {
         />
       </div>
 
-      {audioUrl && (
-        <audio controls src={audioUrl} className="mt-4 rounded-lg shadow" />
-      )}
+      {audioUrl && <audio controls src={audioUrl} className="mt-4 rounded-lg shadow" />}
     </div>
   );
 }
