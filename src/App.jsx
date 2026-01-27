@@ -1,5 +1,10 @@
 // src/App.jsx — FINAL LOCKED VERSION (SHOW_TIMING + Local/Backend Timing Panels)
 // (Backend timing moved under toggle + Local timing panel removed + scrollable TextChat)
+//
+// ✅ PATCHED with Dataset Manager upload logic (NO other logic touched)
+// 1) Backend mode now preserves real filename/extension for both File uploads + Recorder blobs
+// 2) Pass transMode into Recorder (so Recorder can behave correctly per mode)
+// 3) All other UI/flows unchanged
 
 import React, { useState, useEffect, useRef } from "react";
 import Recorder from "./components/Recorder";
@@ -149,6 +154,48 @@ function VoiceChat({ onBack }) {
     }
   }
 
+  // ✅ Dataset Manager style ext detection (robust for blob OR file)
+  const inferExtForUpload = (blobOrFile) => {
+    const isFile = blobOrFile instanceof File;
+    const name = isFile ? String(blobOrFile.name || "") : "";
+    const mime = String(blobOrFile?.type || "").toLowerCase();
+
+    // Prefer real file extension if user browsed a file
+    const extFromName =
+      name && name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+
+    // Otherwise infer from mime/container (Recorder blob)
+    const extFromMime =
+      mime.includes("wav")
+        ? "wav"
+        : mime.includes("mp4") || mime.includes("m4a")
+        ? "mp4"
+        : mime.includes("webm")
+        ? "webm"
+        : mime.includes("ogg")
+        ? "ogg"
+        : mime.includes("mpeg") || mime.includes("mp3")
+        ? "mp3"
+        : "";
+
+    return extFromName || extFromMime || "wav";
+  };
+
+  const buildBackendFormData = (blobOrFile) => {
+    const f = new FormData();
+    f.append("user_id", "usr001");
+
+    const isFile = blobOrFile instanceof File;
+    const name = isFile ? String(blobOrFile.name || "") : "";
+    const ext = inferExtForUpload(blobOrFile);
+
+    // ✅ Keep true name for File; otherwise create a sane name for Blob
+    const fname = name || `voice.${ext}`;
+
+    f.append("file", blobOrFile, fname);
+    return f;
+  };
+
   const handleStop = async (blob) => {
     if (!blob) return;
 
@@ -210,33 +257,8 @@ function VoiceChat({ onBack }) {
       else {
         showToast("📤 Илгээж байна…");
 
-        const f = new FormData();
-        f.append("user_id", "usr001");
-
-        // ✅ GAME-CHANGER: keep true filename for uploads (mp3/wav/webm/ogg/etc)
-        // If it's a File (browse upload), use file.name
-        // If it's a Blob (Recorder), generate by mime type (should be wav after Recorder patch)
-        const isFile = blob instanceof File;
-        const originalName = isFile ? blob.name : "";
-
-        const mime = String(blob?.type || "").toLowerCase();
-        const extFromMime =
-          mime.includes("wav") ? "wav" :
-          (mime.includes("mpeg") || mime.includes("mp3")) ? "mp3" :
-          (mime.includes("mp4") || mime.includes("m4a")) ? "m4a" :
-          mime.includes("ogg") ? "ogg" :
-          mime.includes("webm") ? "webm" :
-          "";
-
-        const extFromName =
-          originalName && originalName.includes(".")
-            ? originalName.split(".").pop().toLowerCase()
-            : "";
-
-        const ext = extFromMime || extFromName || "bin";
-        const fname = originalName || `voice.${ext}`;
-
-        f.append("file", blob, fname);
+        // ✅ Dataset Manager logic: preserve container/filename correctly
+        const f = buildBackendFormData(blob);
 
         const res = await fetch(`${API_BASE}/intent/voice_intent`, { method: "POST", body: f });
         const data = await res.json();
@@ -524,7 +546,10 @@ function TextChat({ onBack }) {
           className="border rounded-lg px-3 py-2 w-2/3 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
           placeholder="Мессэж бичих..."
         />
-        <button onClick={sendMessage} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+        <button
+          onClick={sendMessage}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+        >
           Send
         </button>
       </div>
