@@ -212,7 +212,31 @@ function VoiceChat({ onBack }) {
 
         const f = new FormData();
         f.append("user_id", "usr001");
-        f.append("file", blob, "voice.wav");
+
+        // ✅ GAME-CHANGER: keep true filename for uploads (mp3/wav/webm/ogg/etc)
+        // If it's a File (browse upload), use file.name
+        // If it's a Blob (Recorder), generate by mime type (should be wav after Recorder patch)
+        const isFile = blob instanceof File;
+        const originalName = isFile ? blob.name : "";
+
+        const mime = String(blob?.type || "").toLowerCase();
+        const extFromMime =
+          mime.includes("wav") ? "wav" :
+          (mime.includes("mpeg") || mime.includes("mp3")) ? "mp3" :
+          (mime.includes("mp4") || mime.includes("m4a")) ? "m4a" :
+          mime.includes("ogg") ? "ogg" :
+          mime.includes("webm") ? "webm" :
+          "";
+
+        const extFromName =
+          originalName && originalName.includes(".")
+            ? originalName.split(".").pop().toLowerCase()
+            : "";
+
+        const ext = extFromMime || extFromName || "bin";
+        const fname = originalName || `voice.${ext}`;
+
+        f.append("file", blob, fname);
 
         const res = await fetch(`${API_BASE}/intent/voice_intent`, { method: "POST", body: f });
         const data = await res.json();
@@ -336,7 +360,8 @@ function VoiceChat({ onBack }) {
         </div>
       )}
 
-      <Recorder onStop={handleStop} />
+      {/* ✅ GAME-CHANGER: pass transMode so Recorder behaves correctly */}
+      <Recorder onStop={handleStop} transMode={sttMode === "backend" ? "1" : "0"} />
 
       {/* FILE BROWSER */}
       <div className="mt-4 w-full max-w-md">
@@ -453,7 +478,6 @@ function TextChat({ onBack }) {
   return (
     // ✅ scroll fix: min-h-0 allows flex children to shrink + overflow scroll to work
     <div className="h-screen flex flex-col min-h-0 bg-gradient-to-b from-blue-50 via-teal-50 to-white text-center px-4 relative overflow-hidden">
-
       <button
         onClick={onBack}
         className="absolute top-5 left-5 bg-blue-100 text-blue-700 px-3 py-1 rounded-lg shadow-sm"

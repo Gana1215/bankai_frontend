@@ -1,9 +1,8 @@
 // ===============================================
-// 🎙️ Recorder.jsx — BankAI Recorder (v2.0.2 MODE-SAFE + STOP FIX)
+// 🎙️ Recorder.jsx — BankAI Recorder (v2.0.3 GAME-CHANGER WAV16K MONO)
 // -----------------------------------------------
 // ✅ Keeps your STOP FIX logic exactly
-// ✅ Backend mode: returns RAW webm/ogg blob (NO decodeAudioData)
-// ✅ Front(Local) mode: converts to WAV PCM16
+// ✅ Recording output is ALWAYS WAV 16k mono PCM16 (both Front + Back modes)
 // ✅ Recorder is record-only: App.jsx owns networking
 // ===============================================
 
@@ -80,19 +79,13 @@ export default function Recorder({ onStop, transMode }) {
     try {
       const rawBlob = new Blob(audioChunksRef.current, { type: mimeRef.current });
 
-      // Backend mode: no decodeAudioData
-      if (String(transMode) === "1") {
-        onStop && onStop(rawBlob);
-        setAudioUrl(URL.createObjectURL(rawBlob));
-        lastErrorRef.current = null;
-        return;
-      }
+      // ✅ GAME-CHANGER: Always convert recording to WAV 16k mono PCM16
+      const wavBlob = await convertToWav16kMono(rawBlob);
 
-      // Front(Local) mode: WAV conversion (PCM16)
-      const wavBlob = await convertToWav(rawBlob);
       onStop && onStop(wavBlob);
       setAudioUrl(URL.createObjectURL(wavBlob));
       lastErrorRef.current = null;
+      return;
     } catch (err) {
       console.error(`[RECORDER] finalizeOnce failed (${reason}):`, err);
       lastErrorRef.current = err;
@@ -223,35 +216,84 @@ export default function Recorder({ onStop, transMode }) {
     update();
   };
 
-  const convertToWav = async (blob) => {
-    const audioCtx = new AudioContext();
-    const buffer = await blob.arrayBuffer();
-    let audioBuffer = null;
+  // =========================================================
+  // ✅ GAME-CHANGER WAV ENCODER: decode → mono → resample 16k → PCM16 WAV
+  // =========================================================
 
+  const convertToWav16kMono = async (blob) => {
+    const buffer = await blob.arrayBuffer();
+
+    // Decode at native sample rate
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    let decoded = null;
     try {
-      audioBuffer = await audioCtx.decodeAudioData(buffer);
-    } catch (err) {
-      console.error("[RECORDER] decodeAudioData failed:", err);
-      throw err;
+      decoded = await ctx.decodeAudioData(buffer);
     } finally {
       try {
-        await audioCtx.close?.();
+        await ctx.close?.();
       } catch {}
     }
 
-    const wavBuffer = encodeWavPCM16(audioBuffer);
+    // Mix to mono Float32
+    const mono = mixToMonoFloat32(decoded);
+
+    // Resample to 16k using OfflineAudioContext
+    const resampled16k = await resampleFloat32To16k(mono, decoded.sampleRate);
+
+    // Encode PCM16 WAV @ 16k mono
+    const wavBuffer = encodeWavPCM16FromFloat32(resampled16k, 16000);
     return new Blob([wavBuffer], { type: "audio/wav" });
   };
 
-  const encodeWavPCM16 = (audioBuffer) => {
-    const numOfChan = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
+  const mixToMonoFloat32 = (audioBuffer) => {
+    const n = audioBuffer.numberOfChannels;
+    const len = audioBuffer.length;
+
+    if (n === 1) {
+      // copy to detach from underlying buffer
+      return new Float32Array(audioBuffer.getChannelData(0));
+    }
+
+    const out = new Float32Array(len);
+    for (let ch = 0; ch < n; ch++) {
+      const d = audioBuffer.getChannelData(ch);
+      for (let i = 0; i < len; i++) out[i] += d[i];
+    }
+    const inv = 1 / n;
+    for (let i = 0; i < len; i++) out[i] *= inv;
+    return out;
+  };
+
+  const resampleFloat32To16k = async (monoFloat32, srcSR) => {
+    if (!monoFloat32 || monoFloat32.length === 0) return new Float32Array(0);
+    if (srcSR === 16000) return monoFloat32;
+
+    // Build a temporary AudioBuffer at srcSR
+    const srcLen = monoFloat32.length;
+    const srcBuf = new AudioBuffer({ length: srcLen, numberOfChannels: 1, sampleRate: srcSR });
+    srcBuf.copyToChannel(monoFloat32, 0);
+
+    const duration = srcLen / srcSR;
+    const targetLen = Math.max(1, Math.floor(duration * 16000));
+
+    const offline = new OfflineAudioContext(1, targetLen, 16000);
+    const source = offline.createBufferSource();
+    source.buffer = srcBuf;
+    source.connect(offline.destination);
+    source.start(0);
+
+    const rendered = await offline.startRendering();
+    return new Float32Array(rendered.getChannelData(0));
+  };
+
+  const encodeWavPCM16FromFloat32 = (float32, sampleRate) => {
+    const numOfChan = 1;
     const format = 1;
     const bitDepth = 16;
     const bytesPerSample = bitDepth / 8;
     const blockAlign = numOfChan * bytesPerSample;
 
-    const buffer = new ArrayBuffer(44 + audioBuffer.length * bytesPerSample);
+    const buffer = new ArrayBuffer(44 + float32.length * bytesPerSample);
     const view = new DataView(buffer);
 
     const writeString = (offset, s) =>
@@ -260,10 +302,14 @@ export default function Recorder({ onStop, transMode }) {
     let offset = 0;
     writeString(offset, "RIFF");
     offset += 4;
-    view.setUint32(offset, 36 + audioBuffer.length * bytesPerSample, true);
+    view.setUint32(offset, 36 + float32.length * bytesPerSample, true);
     offset += 4;
-    writeString(offset, "WAVEfmt ");
-    offset += 8;
+
+    writeString(offset, "WAVE");
+    offset += 4;
+
+    writeString(offset, "fmt ");
+    offset += 4;
     view.setUint32(offset, 16, true);
     offset += 4;
     view.setUint16(offset, format, true);
@@ -278,14 +324,14 @@ export default function Recorder({ onStop, transMode }) {
     offset += 2;
     view.setUint16(offset, bitDepth, true);
     offset += 2;
+
     writeString(offset, "data");
     offset += 4;
-    view.setUint32(offset, audioBuffer.length * bytesPerSample, true);
+    view.setUint32(offset, float32.length * bytesPerSample, true);
     offset += 4;
 
-    const channelData = audioBuffer.getChannelData(0);
-    for (let i = 0; i < channelData.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, channelData[i]));
+    for (let i = 0; i < float32.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
       view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
 
@@ -300,32 +346,3 @@ export default function Recorder({ onStop, transMode }) {
       stopViz();
       stopTracks();
       closeAudioCtx();
-      try {
-        const mr = mediaRecorderRef.current;
-        if (mr && mr.state === "recording") mr.stop();
-      } catch {}
-    };
-  }, []);
-
-  return (
-    <div className="flex flex-col items-center justify-center">
-      <button
-        onClick={recording ? stopRecording : startRecording}
-        className={`rounded-full p-8 shadow-lg transition-all duration-300 ${
-          recording ? "bg-red-500 hover:bg-red-600 scale-110" : "bg-blue-500 hover:bg-blue-600"
-        }`}
-      >
-        <span className="text-white text-2xl">{recording ? "🛑" : "🎙️"}</span>
-      </button>
-
-      <div className="w-40 h-2 bg-gray-200 rounded-full mt-4 overflow-hidden">
-        <div
-          className="h-full bg-green-500 transition-all duration-75"
-          style={{ width: `${Math.min(level * 100, 100)}%` }}
-        />
-      </div>
-
-      {audioUrl && <audio controls src={audioUrl} className="mt-4 rounded-lg shadow" />}
-    </div>
-  );
-}

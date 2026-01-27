@@ -1,5 +1,6 @@
 // src/hooks/useOnnxTranscriber.jsx
 import { useCallback, useEffect, useRef, useState } from "react";
+// Import from CDN or your node_modules
 import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3";
 
 const DEBUG_ASR = true;
@@ -19,24 +20,27 @@ export default function useOnnxTranscriber() {
 
   useEffect(() => {
     // --- 1. MODEL FETCH CONFIG ---
+    // ✅ Force remote loading so it doesn't check your Vite server for JSONs
     env.allowRemoteModels = true;
     env.allowLocalModels = false; 
-    
-    // --- 2. THE WASM SPEED PATCH ---
+    //env.localModelPath = null; 
+   // env.localModelPath = "/"; // 👈 Changed from null to ""  
+    // --- 2. WASM ENGINE CONFIG ---
     const wasm = env.backends?.onnx?.wasm;
     if (wasm && typeof window !== "undefined") {
+      // Points to /public/ort/ for the .wasm files
       wasm.wasmPaths = window.location.origin + "/ort/";
       
-      // FORCED FASTEST SETUP:
-      // On mobile, 2 threads maximize SIMD without hitting thermal walls.
-      // Proxy = true keeps the UI thread 100% butter-smooth.
+      // Mobile-safe thread management
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      wasm.numThreads = isMobile ? 2 : 4; 
-      wasm.proxy = true; 
-      wasm.simd = true; 
+      const canThread = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+      
+      wasm.numThreads = isMobile ? 1 : (canThread ? 4 : 1);
+      wasm.proxy = false;
+      wasm.simd = true;
     }
 
-    dbg("🧠 [HOOK] Booted: ULTRA-WASM Mode (INT8)");
+    dbg("🧠 [HOOK] Booted: Remote-Only Mode (INT8)");
   }, []);
 
   const load = useCallback(async () => {
@@ -54,8 +58,8 @@ export default function useOnnxTranscriber() {
           "automatic-speech-recognition",
           MODEL_ID,
           {
-            device: "wasm", // ⚡️ HARD-LOCKED TO WASM
-            dtype: "q8",    // ⚡️ NATIVE INT8 SPEED
+            device: "webgpu",
+            dtype: "q8", // Matches your INT8 model
             model_file_names: {
               encoder_model: "encoder_model_quantized.onnx",
               decoder_model_merged: "decoder_model_merged_quantized.onnx",
@@ -78,7 +82,14 @@ export default function useOnnxTranscriber() {
 
       } catch (err) {
         dbe("❌ [HOOK] Load failed:", err);
-        setStatusText(`❌ Load error: ${err.message}`);
+        
+        // Final sanity check for the user
+        if (err.message?.includes("<")) {
+          setStatusText("❌ Error: HF Repo is missing config files (returned HTML).");
+        } else {
+          setStatusText(`❌ Load error: ${err.message}`);
+        }
+        
         setReady(false);
         setBusy(false);
         throw err;
@@ -104,16 +115,12 @@ export default function useOnnxTranscriber() {
       const audioData = decoded.getChannelData(0);
       await audioCtx.close();
 
-      // --- 3. DECODING SPEED OPTIMIZATION ---
       const result = await transcriberRef.current(audioData, {
-        language: "mn",        // Use ISO code for faster token matching
+        language: "mongolian",
         task: "transcribe",
-        return_timestamps: false, // ⚡️ MASSIVE SPEEDUP: Disabling timestamps saves CPU cycles
         generate_kwargs: {
-          num_beams: 1,         // Greedy search is significantly faster than beams
+          num_beams: 1,
           max_new_tokens: 256,
-          language: "mn",
-          task: "transcribe",
         },
       });
 
