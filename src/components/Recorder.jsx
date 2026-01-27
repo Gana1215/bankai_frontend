@@ -346,3 +346,32 @@ export default function Recorder({ onStop, transMode }) {
       stopViz();
       stopTracks();
       closeAudioCtx();
+      try {
+        const mr = mediaRecorderRef.current;
+        if (mr && mr.state === "recording") mr.stop();
+      } catch {}
+    };
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center justify-center">
+      <button
+        onClick={recording ? stopRecording : startRecording}
+        className={`rounded-full p-8 shadow-lg transition-all duration-300 ${
+          recording ? "bg-red-500 hover:bg-red-600 scale-110" : "bg-blue-500 hover:bg-blue-600"
+        }`}
+      >
+        <span className="text-white text-2xl">{recording ? "🛑" : "🎙️"}</span>
+      </button>
+
+      <div className="w-40 h-2 bg-gray-200 rounded-full mt-4 overflow-hidden">
+        <div
+          className="h-full bg-green-500 transition-all duration-75"
+          style={{ width: `${Math.min(level * 100, 100)}%` }}
+        />
+      </div>
+
+      {audioUrl && <audio controls src={audioUrl} className="mt-4 rounded-lg shadow" />}
+    </div>
+  );
+}
