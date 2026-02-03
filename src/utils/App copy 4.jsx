@@ -4,39 +4,20 @@
 // ✅ PATCHED with Dataset Manager upload logic (NO other logic touched)
 // 1) Backend mode now preserves real filename/extension for both File uploads + Recorder blobs
 // 2) Pass transMode into Recorder (so Recorder can behave correctly per mode)
-// 3) NEW: Transaction screen routing when backend says start_txn_form (transfer_money)
-// 4) All other UI/flows unchanged
+// 3) All other UI/flows unchanged
 //
-// ✅ FINAL PATCH (THIS MESSAGE):
-// - Fix txn trigger to support: action OR intent OR base_intent OR intent_key
-// - Optional: suppress TTS autoplay when txn starts
-// - ✅ ADD: TextChat can also open txn screen based on text_intent response
-// - ✅ ADD: txn back navigates to correct previous screen (voice OR text)
-// - ✅ FIX: TransactionModal mode="text" when entry_from === "text"
-// - All other logic unchanged
+// ✅ NEW: Transaction Modal (ALL-IN-ONE) auto-opens on transfer_money intent
+// - Only adds: import + txnOpen state + auto-open effect + <TransactionModal />
 
 import React, { useState, useEffect, useRef } from "react";
 import Recorder from "./components/Recorder";
+import TransactionModal from "./components/TransactionModal"; // ✅ NEW
 import { API_BASE } from "./utils/api";
 import useOnnxTranscriber from "./hooks/useOnnxTranscriber";
 import "./components/amplitude.css";
 
-// ✅ FINAL: Transaction UI (voice-slot OR text-manual selected by mode)
-import TransactionModal from "./components/TransactionModal";
-
 const TRANS_MODE_DEFAULT = import.meta.env.VITE_TRANS_MODE || "1";
 const SHOW_TIMING = String(import.meta.env.VITE_SHOW_TIMING || "0") === "1"; // ⭐ safer
-
-// ====================================================
-// ✅ Shared TXN trigger detection (works for Voice + Text)
-// ====================================================
-const detectTxn = (data, fallbackText = "") => {
-  const action = data?.action;
-  const intent = data?.intent || data?.base_intent || data?.intent_key;
-  const userText = data?.user_text || fallbackText || "";
-  const ok = action === "start_txn_form" || intent === "transfer_money";
-  return { ok, userText, action, intent };
-};
 
 // ====================================================
 // Status Panel (Front-end ONNX)
@@ -97,11 +78,14 @@ function StatusPanel({ ready, busy, statusText, progress }) {
 // ====================================================
 // VoiceChat (Front + Backend STT)
 // ====================================================
-function VoiceChat({ onBack, onStartTxn }) {
+function VoiceChat({ onBack }) {
   const [reply, setReply] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+
+  // ✅ NEW: Transaction modal open/close
+  const [txnOpen, setTxnOpen] = useState(false);
 
   // transcript + RTF (local)
   const [lastTranscript, setLastTranscript] = useState("");
@@ -140,7 +124,7 @@ function VoiceChat({ onBack, onStartTxn }) {
     try {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-    } catch {}
+    } catch { }
   };
 
   const showToast = (msg, ms = 2300) => {
@@ -148,23 +132,22 @@ function VoiceChat({ onBack, onStartTxn }) {
     setTimeout(() => setToast(""), ms);
   };
 
-  // ✅ FINAL: Suppress TTS autoplay when txn starts (prevents audio fighting modal)
   useEffect(() => {
     if (!reply?.voice_url) return;
-
-    const intent = reply?.intent || reply?.base_intent || reply?.intent_key;
-    const action = reply?.action;
-
-    if (action === "start_txn_form" || intent === "transfer_money") return;
-
     setTimeout(async () => {
       try {
         stopPlayback();
         audioRef.current.src = `${API_BASE}${reply.voice_url}`;
         await audioRef.current.play();
-      } catch {}
+      } catch { }
     }, 400);
   }, [reply]);
+
+  // ✅ NEW: Auto-open transaction modal when intent is transfer_money
+  useEffect(() => {
+    const intent = reply?.intent || reply?.base_intent || "";
+    if (intent === "transfer_money") setTxnOpen(true);
+  }, [reply?.intent, reply?.base_intent]);
 
   // Local mode audio duration decode
   async function getAudioDurationSec(blob) {
@@ -177,7 +160,7 @@ function VoiceChat({ onBack, onStartTxn }) {
       const sec = decoded?.duration ?? null;
       try {
         await audioCtx.close();
-      } catch {}
+      } catch { }
       return sec;
     } catch {
       return null;
@@ -190,21 +173,23 @@ function VoiceChat({ onBack, onStartTxn }) {
     const name = isFile ? String(blobOrFile.name || "") : "";
     const mime = String(blobOrFile?.type || "").toLowerCase();
 
+    // Prefer real file extension if user browsed a file
     const extFromName =
       name && name.includes(".") ? name.split(".").pop().toLowerCase() : "";
 
+    // Otherwise infer from mime/container (Recorder blob)
     const extFromMime =
       mime.includes("wav")
         ? "wav"
         : mime.includes("mp4") || mime.includes("m4a")
-        ? "mp4"
-        : mime.includes("webm")
-        ? "webm"
-        : mime.includes("ogg")
-        ? "ogg"
-        : mime.includes("mpeg") || mime.includes("mp3")
-        ? "mp3"
-        : "";
+          ? "mp4"
+          : mime.includes("webm")
+            ? "webm"
+            : mime.includes("ogg")
+              ? "ogg"
+              : mime.includes("mpeg") || mime.includes("mp3")
+                ? "mp3"
+                : "";
 
     return extFromName || extFromMime || "wav";
   };
@@ -217,7 +202,9 @@ function VoiceChat({ onBack, onStartTxn }) {
     const name = isFile ? String(blobOrFile.name || "") : "";
     const ext = inferExtForUpload(blobOrFile);
 
+    // ✅ Keep true name for File; otherwise create a sane name for Blob
     const fname = name || `voice.${ext}`;
+
     f.append("file", blobOrFile, fname);
     return f;
   };
@@ -273,21 +260,8 @@ function VoiceChat({ onBack, onStartTxn }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
         });
-        const data = await res.json();
-        setReply(data);
+        setReply(await res.json());
         showToast("🤖 BankAI хариуллаа!");
-
-        const tx = detectTxn(data, text);
-        console.log("[TXN_TRIGGER][LOCAL]", { action: tx.action, intent: tx.intent });
-        if (tx.ok) {
-          onStartTxn?.({
-            entry_intent: "transfer_money",
-            entry_source: "voice_local",
-            entry_from: "voice",
-            user_text: tx.userText,
-          });
-          return;
-        }
       }
 
       // =======================
@@ -296,10 +270,11 @@ function VoiceChat({ onBack, onStartTxn }) {
       else {
         showToast("📤 Илгээж байна…");
 
+        // ✅ Dataset Manager logic: preserve container/filename correctly
         const f = buildBackendFormData(blob);
+
         const res = await fetch(`${API_BASE}/intent/voice_intent`, { method: "POST", body: f });
         const data = await res.json();
-
         setReply(data);
 
         setBackendDemo({
@@ -310,18 +285,6 @@ function VoiceChat({ onBack, onStartTxn }) {
         });
 
         showToast("🤖 BankAI хариуллаа!");
-
-        const tx = detectTxn(data, "");
-        console.log("[TXN_TRIGGER][BACK]", { action: tx.action, intent: tx.intent });
-        if (tx.ok) {
-          onStartTxn?.({
-            entry_intent: "transfer_money",
-            entry_source: "voice_backend",
-            entry_from: "voice",
-            user_text: tx.userText,
-          });
-          return;
-        }
       }
     } catch (err) {
       console.error(err);
@@ -357,10 +320,9 @@ function VoiceChat({ onBack, onStartTxn }) {
         <button
           onClick={() => setSttMode((m) => (m === "local" ? "backend" : "local"))}
           className={`relative w-[280px] h-[48px] rounded-2xl border shadow-md transition-all active:scale-[0.99]
-            ${
-              sttMode === "local"
-                ? "bg-emerald-600/90 border-emerald-700/30"
-                : "bg-blue-600/90 border-blue-700/30"
+            ${sttMode === "local"
+              ? "bg-emerald-600/90 border-emerald-700/30"
+              : "bg-blue-600/90 border-blue-700/30"
             }`}
         >
           <div className="absolute inset-0 flex items-center justify-between px-4 text-[11px] font-mono uppercase tracking-widest text-white/90">
@@ -387,7 +349,9 @@ function VoiceChat({ onBack, onStartTxn }) {
         )}
       </div>
 
-      {/* BACKEND TIMING PANEL */}
+      {/* ================================================= */}
+      {/* ⭐ BACKEND TIMING PANEL (MOVED: under toggle)      */}
+      {/* ================================================= */}
       {sttMode === "backend" && backendDemo && !loading && (
         <div className="w-full max-w-md bg-white/80 border border-blue-100 rounded-2xl p-4 shadow-sm mb-4 text-left">
           <div className="text-[11px] font-mono text-gray-700 whitespace-pre-line">
@@ -398,15 +362,24 @@ function VoiceChat({ onBack, onStartTxn }) {
           <div className="mt-2 text-[12px] font-mono text-blue-900 whitespace-pre-line">
             📝 Text: “{backendDemo.user_text || "—"}”
           </div>
+
+          {(backendDemo.stt_ms == null || backendDemo.total_ms == null) && (
+            <div className="mt-2 text-[11px] font-mono text-amber-700">
+              ⚠️ Backend timing fields are missing. Patch backend /voice_intent to return user_text/stt_ms/processing_ms/total_ms.
+            </div>
+          )}
         </div>
       )}
 
-      {/* TRANSCRIPT BOX */}
+      {/* ================================================= */}
+      {/* TRANSCRIPT BOX (shown for both local and backend) */}
+      {/* ================================================= */}
       {(sttMode === "local" || lastTranscript) && (
         <div className="w-full max-w-md bg-white/70 border border-gray-200 rounded-2xl p-4 shadow-sm mb-6 text-left">
           <div className="flex items-center justify-between">
             <div className="text-[11px] font-mono uppercase tracking-widest text-gray-700">Transcript</div>
 
+            {/* Local metadata (unchanged) */}
             <div className="text-[10px] font-mono text-gray-500">
               {lastPerf.inferMs != null ? `${lastPerf.inferMs}ms` : ""}
               {lastPerf.audioSec != null ? ` • ${lastPerf.audioSec.toFixed(2)}s` : ""}
@@ -421,6 +394,7 @@ function VoiceChat({ onBack, onStartTxn }) {
         </div>
       )}
 
+      {/* ✅ GAME-CHANGER: pass transMode so Recorder behaves correctly */}
       <Recorder onStop={handleStop} transMode={sttMode === "backend" ? "1" : "0"} />
 
       {/* FILE BROWSER */}
@@ -452,6 +426,13 @@ function VoiceChat({ onBack, onStartTxn }) {
         </div>
       )}
 
+      {/* ✅ NEW: Transaction modal mount (does not change any other UI) */}
+      <TransactionModal
+        open={txnOpen}
+        onClose={() => setTxnOpen(false)}
+        initialTranscript={backendDemo?.user_text || lastTranscript || ""}
+      />
+
       {toast && <p className="text-blue-700 mt-4">{toast}</p>}
       {error && <p className="text-red-600 mt-4">{error}</p>}
     </div>
@@ -461,7 +442,7 @@ function VoiceChat({ onBack, onStartTxn }) {
 // ====================================================
 // TEXT CHAT — SCROLLABLE + intent buttons
 // ====================================================
-function TextChat({ onBack, onStartTxn }) {
+function TextChat({ onBack }) {
   const [messages, setMessages] = useState([]);
   const [intents, setIntents] = useState([]);
   const [input, setInput] = useState("");
@@ -500,29 +481,16 @@ function TextChat({ onBack, onStartTxn }) {
       const res = await fetch(`${API_BASE}/intent/text_intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // ✅ LOCKED: use direct_click for direct intent buttons
         body: JSON.stringify({ intent: key, source: "direct_click" }),
       });
       const data = await res.json();
-
-      const tx = detectTxn(data, displayText);
-      console.log("[TXN_TRIGGER][TEXT][CLICK]", { action: tx.action, intent: tx.intent });
-
-      if (tx.ok) {
-        onStartTxn?.({
-          entry_intent: "transfer_money",
-          entry_source: "text_click",
-          entry_from: "text",
-          user_text: tx.userText,
-        });
-        return;
-      }
-
       setMessages((m) => [...m, { role: "bot", text: data.reply_text }]);
     } catch {
       setMessages((m) => [...m, { role: "bot", text: "⚠️ Сервертэй холбогдох алдаа." }]);
-    } finally {
-      setTyping(false);
     }
+
+    setTyping(false);
   };
 
   const sendMessage = async () => {
@@ -540,29 +508,16 @@ function TextChat({ onBack, onStartTxn }) {
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
-
-      const tx = detectTxn(data, text);
-      console.log("[TXN_TRIGGER][TEXT][TYPE]", { action: tx.action, intent: tx.intent });
-
-      if (tx.ok) {
-        onStartTxn?.({
-          entry_intent: "transfer_money",
-          entry_source: "text_type",
-          entry_from: "text",
-          user_text: tx.userText,
-        });
-        return;
-      }
-
       setMessages((m) => [...m, { role: "bot", text: data.reply_text }]);
     } catch {
       setMessages((m) => [...m, { role: "bot", text: "⚠️ Сервертэй холбогдох боломжгүй." }]);
-    } finally {
-      setTyping(false);
     }
+
+    setTyping(false);
   };
 
   return (
+    // ✅ scroll fix: min-h-0 allows flex children to shrink + overflow scroll to work
     <div className="h-screen flex flex-col min-h-0 bg-gradient-to-b from-blue-50 via-teal-50 to-white text-center px-4 relative overflow-hidden">
       <button
         onClick={onBack}
@@ -573,6 +528,7 @@ function TextChat({ onBack, onStartTxn }) {
 
       <h1 className="text-3xl font-bold text-blue-700 mt-8 mb-2">💬 BankAI Chatbot</h1>
 
+      {/* Intent buttons */}
       {intents.length > 0 && (
         <div className="flex flex-wrap justify-center gap-3 mb-6 px-1 mt-4">
           {intents.map((i) => (
@@ -587,6 +543,7 @@ function TextChat({ onBack, onStartTxn }) {
         </div>
       )}
 
+      {/* Scrollable Chat Window */}
       <div className="flex-1 min-h-0 overflow-y-auto w-full max-w-md mx-auto bg-white rounded-2xl shadow-inner p-4 mb-4 mt-2">
         {messages.map((m, i) => (
           <div
@@ -599,6 +556,7 @@ function TextChat({ onBack, onStartTxn }) {
         <div ref={chatEndRef} />
       </div>
 
+      {/* Input */}
       <div className="flex gap-2 justify-center mb-6">
         <input
           value={input}
@@ -607,10 +565,7 @@ function TextChat({ onBack, onStartTxn }) {
           className="border rounded-lg px-3 py-2 w-2/3 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
           placeholder="Мессэж бичих..."
         />
-        <button
-          onClick={sendMessage}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
-        >
+        <button onClick={sendMessage} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
           Send
         </button>
       </div>
@@ -619,57 +574,13 @@ function TextChat({ onBack, onStartTxn }) {
 }
 
 // ====================================================
-// ✅ Transaction Screen wrapper
-// ====================================================
-function TransactionScreen({ onBack, entry }) {
-  const mode = entry?.entry_from === "text" ? "text" : "voice";
-
-  return (
-    <TransactionModal
-      open={true}
-      onClose={onBack}
-      initialTranscript={entry?.user_text || ""}
-      mode={mode}
-    />
-  );
-}
-
-
-// ====================================================
 // App Controller
 // ====================================================
 export default function App() {
   const [screen, setScreen] = useState("menu");
 
-  // ✅ store entry info for txn screen (optional debug)
-  const [txnEntry, setTxnEntry] = useState(null);
-
-  if (screen === "voice")
-    return (
-      <VoiceChat
-        onBack={() => setScreen("menu")}
-        onStartTxn={(entry) => {
-          setTxnEntry(entry || null);
-          setScreen("txn");
-        }}
-      />
-    );
-
-  if (screen === "text")
-    return (
-      <TextChat
-        onBack={() => setScreen("menu")}
-        onStartTxn={(entry) => {
-          setTxnEntry(entry || null);
-          setScreen("txn");
-        }}
-      />
-    );
-
-  if (screen === "txn") {
-    const backTo = txnEntry?.entry_from === "text" ? "text" : "voice";
-    return <TransactionScreen onBack={() => setScreen(backTo)} entry={txnEntry} />;
-  }
+  if (screen === "voice") return <VoiceChat onBack={() => setScreen("menu")} />;
+  if (screen === "text") return <TextChat onBack={() => setScreen("menu")} />;
 
   const defaultLabel = TRANS_MODE_DEFAULT === "0" ? "Front Model mode" : "Back Model mode";
 
